@@ -1,4 +1,5 @@
 import { getProxyPoolById } from "@/models";
+import { getProxyManager } from '@/lib/proxyManager.js';
 
 // Safely normalize any value into a trimmed string.
 function normalizeString(value) {
@@ -7,27 +8,22 @@ function normalizeString(value) {
 }
 
 // ─── Proxy pool rotation state (in-memory) ─────────────────────────
-const rotateState = new Map(); // providerId → { index }
+const rotateState = new Map(); // providerId → { index } (legacy fallback)
 
 /**
  * Pick one proxy pool ID from a list based on strategy.
- * round-robin: cycle sequentially (in-memory, resets on restart)
+ * round-robin: time+error-based rotation via ProxyManager (thay vì per-request)
  * random:      uniform random pick
  * none/single: return first entry
  */
-export function pickProxyPoolId(poolIds, strategy, providerId) {
+export function pickProxyPoolId(poolIds, strategy, providerId, comboId = null) {
   if (!poolIds || poolIds.length === 0) return null;
   if (poolIds.length === 1) return poolIds[0];
 
-  if (strategy === "round-robin") {
-    const state = rotateState.get(providerId) || { index: -1 };
-    state.index = (state.index + 1) % poolIds.length;
-    rotateState.set(providerId, state);
-    return poolIds[state.index];
-  }
-
-  if (strategy === "random") {
-    return poolIds[Math.floor(Math.random() * poolIds.length)];
+  if (strategy === "round-robin" || strategy === "random") {
+    // Use ProxyManager: sticky proxy per combo, time+error rotation
+    const proxyManager = getProxyManager();
+    return proxyManager.getProxy(providerId, poolIds, comboId, strategy);
   }
 
   return poolIds[0]; // "none" or unknown
