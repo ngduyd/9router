@@ -50,8 +50,16 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       let pickedId = override.proxyPoolId || null;
       if (strategy !== "none") {
         const allPools = await getProxyPools({ isActive: true });
-        const poolIds = allPools.filter(p => p.proxyUrl).map(p => p.id);
-        pickedId = pickProxyPoolId(poolIds, strategy, providerId);
+        // Exclude relay-type pools (vercel/cloudflare/deno): shared egress IPs,
+        // rotating them does not bypass per-IP rate limits
+        const poolIds = allPools
+          .filter(p => p.proxyUrl)
+          .filter(p => {
+            let t = ""; try { t = JSON.parse(p.data || "{}").type || ""; } catch { }
+            return !(t === "vercel" || t === "cloudflare" || t === "deno");
+          })
+          .map(p => p.id);
+        pickedId = pickProxyPoolId(poolIds, strategy, providerId, model);
       }
       const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
       return {
