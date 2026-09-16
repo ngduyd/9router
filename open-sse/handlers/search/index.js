@@ -10,7 +10,7 @@
 import { buildSearchRequest } from "./callers.js";
 import { normalizeSearchResponse } from "./normalizers.js";
 import { handleChatSearch } from "./chatSearch.js";
-import { fetchPublic } from "../../../src/shared/utils/ssrfGuard.js";
+import { fetchPublic, assertPublicUrlResolved } from "../../../src/shared/utils/ssrfGuard.js";
 
 const GLOBAL_TIMEOUT_MS = 15000;
 const NON_RETRIABLE = new Set([400, 401, 403, 404]);
@@ -59,6 +59,62 @@ function successResult(data) {
 }
 
 /**
+ * Try to extract a URL origin (protocol+host+port) for comparison.
+ * Returns null if baseUrl is missing or unparseable.
+ */
+function tryOrigin(baseUrl) {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch with admin-origin bypass: if the request URL's origin matches the
+ * admin-configured providerConfig.baseUrl origin, skip SSRF DNS resolution
+ * (the admin trusted this address). Cross-origin redirects are still
+ * re-validated before following.
+ *
+ * When origins differ (user override) or baseUrl is unparseable, falls
+ * back to the standard fetchPublic path.
+ */
+async function fetchWithAdminOriginBypass(url, init, providerConfig) {
+  const adminOrigin = tryOrigin(providerConfig?.baseUrl);
+  let requestOrigin;
+  try {
+    requestOrigin = new URL(url).origin;
+  } catch {
+    // unparseable → guard everything
+    return fetchPublic(url, init);
+  }
+
+  if (!adminOrigin || adminOrigin !== requestOrigin) {
+    // User override or unparseable baseUrl → standard SSRF guard
+    return fetchPublic(url, init);
+  }
+
+  // Same origin as admin config → trusted path with manual redirect handling.
+  // Same-origin redirects allowed without DNS re-check; cross-origin hops
+  // are re-validated through assertPublicUrlResolved.
+  let currentUrl = url;
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(currentUrl, { ...init, redirect: "manual" });
+    const isRedirect = res.status >= 300 && res.status < 400;
+    const location = isRedirect ? res.headers.get("location") : null;
+    if (!location) return res;
+    if (hop >= 5) throw new Error("Blocked URL: too many redirects");
+    const nextUrl = new URL(location, currentUrl).toString();
+    const nextOrigin = new URL(nextUrl).origin;
+    if (nextOrigin !== adminOrigin) {
+      // Cross-origin redirect → re-validate with full SSRF guard
+      await assertPublicUrlResolved(nextUrl);
+    }
+    currentUrl = nextUrl;
+  }
+}
+
+/**
  * Run a single dedicated search provider attempt.
  * @returns {Promise<{success:boolean, status?:number, error?:string, data?:object}>}
  */
@@ -101,7 +157,8 @@ async function tryDedicatedProvider({ provider, providerConfig, body, credential
   log?.info?.("SEARCH", `${provider.id} | "${params.query.slice(0, 80)}" | type=${params.searchType}`);
 
   try {
-    const resp = await fetchPublic(url, { ...init, headers: sanitizeHeaders(init.headers), signal: controller.signal });
+    const fetchInit = { ...init, headers: sanitizeHeaders(init.headers), signal: controller.signal };
+    const resp = await fetchWithAdminOriginBypass(url, fetchInit, providerConfig);
     clearTimeout(timer);
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "");
