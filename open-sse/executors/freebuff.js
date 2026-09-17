@@ -128,7 +128,8 @@ const FREE_ROOT_AGENT_BY_MODEL = {
   "mimo/mimo-v2.5": "base3-free-mimo",
   "openai/gpt-5.6-luna": "base3-free-luna",
   "upstage/solar-pro4": "base3-free-solar-pro4",
-  "meta/muse-spark-1.3-contributor": "base3-free-muse-spark-1-3",
+  // ponytail: agent id for 1.2 unverified upstream; rename when confirmed
+  "meta/muse-spark-1.2-contributor": "base3-free-muse-spark-1-3",
   "anthropic/claude-fable-5": "base3-free-fable",
 };
 
@@ -309,6 +310,16 @@ async function requestSession(token, model, proxyOptions) {
 
   const status = data?.status;
   if (status === "active") {
+    // Server may return a fallback session bound to another model; caching it
+    // under the requested model's key causes a 409 mismatch loop on chat.
+    if (data.model && data.model !== model) {
+      const err = new Error(
+        `Freebuff session model mismatch: requested ${model} but got ${data.model} — the session is locked to another model. Wait for it to expire or use a different account.`
+      );
+      err.status = 409;
+      err.resetsAtMs = Date.now() + SESSION_DEFAULT_TTL_MS;
+      throw err;
+    }
     const parsedExp = Date.parse(data.expiresAt || "");
     const entry = {
       instanceId: data.instanceId,
@@ -576,6 +587,11 @@ export class FreebuffExecutor extends BaseExecutor {
       cost_mode: "free",
     };
     body.provider = { allow_fallbacks: false };
+    // Backend only returns the final usage SSE event when the client asks via
+    // stream_options.include_usage; without it onStreamComplete sees usage=null.
+    if (stream && !body.stream_options) {
+      body.stream_options = { include_usage: true };
+    }
     // Freebuff agents (base3-free-*) own reasoning: the backend applies the
     // agent's reasoningOptions.effort server-side, so a client-sent
     // reasoning_effort / reasoning.effort collides with that default →

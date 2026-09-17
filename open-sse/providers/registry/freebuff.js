@@ -78,7 +78,7 @@ export default {
     { id: "openai/gpt-5.6-luna", name: "GPT-5.6 Luna" },
     { id: "mimo/mimo-v2.5", name: "MiMo 2.5" },
     { id: "upstage/solar-pro4", name: "Solar Pro 4" },
-    { id: "meta/muse-spark-1.3-contributor", name: "Muse Spark 1.3" },
+    { id: "meta/muse-spark-1.2-contributor", name: "Muse Spark 1.2" },
     { id: "anthropic/claude-fable-5", name: "Claude Fable 5 (limited offer)" },
   ],
   // Login-flow host — the CLI in freebuff mode logs in via freebuff.com, and
