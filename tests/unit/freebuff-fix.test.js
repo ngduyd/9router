@@ -12,6 +12,7 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 }));
 
 import { FreebuffExecutor, __test__, resetSessionCache } from "../../open-sse/executors/freebuff.js";
+import { resetFreebuffModelsCache } from "../../open-sse/services/freebuffModels.js";
 import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
 
 const { requestSession } = __test__;
@@ -21,6 +22,7 @@ const EXECUTOR = new FreebuffExecutor();
 beforeEach(() => {
   fetchMock.mockReset();
   resetSessionCache();
+  resetFreebuffModelsCache();
 });
 
 // ---- P0: transformRequest stream_options ----
@@ -70,7 +72,7 @@ describe("freebuff requestSession model mismatch guard", () => {
   });
 
   it("has a resetsAtMs in the future on mismatch", async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchMock.mockResolvedValue(
       sessionResponse({ status: "active", instanceId: "inst-1b", model: "deepseek/deepseek-v4-flash" })
     );
     const err = await requestSession("tok2", "mimo/mimo-v2.5", undefined).catch((e) => e);
@@ -79,7 +81,7 @@ describe("freebuff requestSession model mismatch guard", () => {
   });
 
   it("passes when server model matches requested model", async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchMock.mockResolvedValue(
       sessionResponse({ status: "active", instanceId: "inst-2", model: "mimo/mimo-v2.5", expiresAt: "" })
     );
     const res = await requestSession("tok4", "mimo/mimo-v2.5", undefined);
@@ -87,7 +89,7 @@ describe("freebuff requestSession model mismatch guard", () => {
   });
 
   it("passes when server omits model field (backward compat)", async () => {
-    fetchMock.mockResolvedValueOnce(
+    fetchMock.mockResolvedValue(
       sessionResponse({ status: "active", instanceId: "inst-3" })
     );
     const res = await requestSession("tok5", "deepseek/deepseek-v4-flash", undefined);

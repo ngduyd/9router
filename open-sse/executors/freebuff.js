@@ -9,6 +9,7 @@ import {
   resolveRetryEntry,
 } from "../config/runtimeConfig.js";
 import { markPoolUnfit, clearPoolUnfit } from "../services/proxyPoolFitness.js";
+import { getFreebuffModels, preCheckCredits } from "../services/freebuffModels.js";
 
 /**
  * Freebuff Executor — OpenAI-compatible chat completions on
@@ -283,6 +284,20 @@ async function requestSession(token, model, proxyOptions) {
   // Offer-gated models (Fable) refuse claims while their wave pool is closed —
   // checked before the POST so a closed offer never burns a claim attempt.
   await guardOfferClaim(token, model, proxyOptions);
+
+  // Credits pre-check (spec P5): priced models need freebucks balance >= price.
+  // Unknown freebucks → pass; the server's spend_limited gate is the backstop.
+  const { freebucks } = await getFreebuffModels(token, { proxyOptions });
+  if (!preCheckCredits(model, freebucks)) {
+    const price = freebucks.prices[model];
+    const balance = Number(freebucks?.balance) || 0;
+    const err = new Error(
+      `Freebuff credits insufficient for ${model}: need ${price}, have ${balance}`,
+    );
+    err.status = 402;
+    err.resetsAtMs = Date.now() + 10 * 60 * 1000;
+    throw err;
+  }
 
   const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
     method: "POST",
@@ -811,6 +826,7 @@ export const __test__ = {
   fetchWithNetworkRetry,
   fetchSessionOffers,
   guardOfferClaim,
+  getFreebuffModels,
   OFFER_GATED_MODELS,
   FREEBUFF_SYSTEM_MARKER,
   SESSION_STALE_CODES,
