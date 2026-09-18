@@ -29,8 +29,8 @@ const LOGIN_HOST = "https://freebuff.com";
 const freebuff = {
   config: FREEBUFF_CONFIG,
   flowType: "device_code",
-  requestDeviceCode: async (config) => {
-    const fingerprintId = crypto.randomUUID();
+  requestDeviceCode: async (config, _codeChallenge, options = {}) => {
+    const fingerprintId = `enhanced-${crypto.createHash("sha256").update(crypto.randomUUID()).digest("base64url")}`;
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
     const response = await proxyAwareFetch(
       `${baseUrl}${config.loginCodePath || "/api/auth/cli/code"}`,
@@ -43,6 +43,7 @@ const freebuff = {
         },
         body: JSON.stringify({ fingerprintId }),
       },
+      options?.proxyOptions || null,
     );
     if (!response.ok) {
       const error = await response.text();
@@ -76,7 +77,7 @@ const freebuff = {
       interval: 5,
     };
   },
-  pollToken: async (config, deviceCode) => {
+  pollToken: async (config, deviceCode, _codeVerifier, _extraData, proxyOptions = null) => {
     let parsed = {};
     try {
       parsed = JSON.parse(deviceCode) || {};
@@ -103,6 +104,7 @@ const freebuff = {
           "User-Agent": "Bun/1.3.14",
         },
       },
+      proxyOptions,
     );
     let data;
     try {

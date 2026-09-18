@@ -837,7 +837,7 @@ async function testFreebuffConnection(connection, effectiveProxy) {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
-        "User-Agent": "codebuff-cli/0.0.138",
+        "User-Agent": "Bun/1.3.14",
         Accept: "application/json",
       },
     }, effectiveProxy);
