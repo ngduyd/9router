@@ -4,7 +4,6 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
-import { getProviderConnectionById } from "../../src/lib/db/repos/connectionsRepo.js";
 import {
   FETCH_CONNECT_TIMEOUT_MS,
   DEFAULT_RETRY_CONFIG,
@@ -319,7 +318,7 @@ async function requestSession(token, model, proxyOptions) {
       // P6: Wire mimic — session headers per CLI (freebuff-session-api.ts:118-135)
       "x-fb-timezone": getTimezoneForProxy(proxyOptions),
       "x-freebuff-wallet-spend-limit": "0",
-      "x-freebuff-first-tab-discount": "true",
+      "x-freebuff-first-tab-discount": "0",
     },
   }, proxyOptions);
 
@@ -619,6 +618,14 @@ export class FreebuffExecutor extends BaseExecutor {
       return {
         status: 404,
         message: `Freebuff upstream rejected the request (404: "${text.trim().slice(0, 90)}"). Tool-calling requests need the CLI's end_turn tool — retry; if it persists the Codebuff backend may be having trouble.`,
+        resetsAtMs: Date.now() + 120_000,
+      };
+    }
+    // ponytail: "Model not found" — model router rejected, treat as cooldown-worthy
+    if (response?.status === 404 && /Model not found/i.test(text)) {
+      return {
+        status: 404,
+        message: `Freebuff model not found (404: "${text.trim().slice(0, 90)}"). This model may not be available right now.`,
         resetsAtMs: Date.now() + 120_000,
       };
     }
