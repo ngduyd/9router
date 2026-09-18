@@ -374,7 +374,11 @@ async function requestSession(token, model, proxyOptions) {
   };
   if (GATE_MESSAGES[status]) {
     const message = data?.message ? `${GATE_MESSAGES[status]} ${data.message}` : GATE_MESSAGES[status];
-    throw new Error(message);
+    const err = new Error(message);
+    if (status === 'banned') { err.status = 403; err.isBanned = true; err.resetsAtMs = Date.now() + 3600000; }
+    if (status === 'country_blocked') { err.status = 451; err.isGeoBlocked = true; }
+    if (status === 'ip_capped') { err.status = 429; err.isIpCapped = true; err.resetsAtMs = Date.now() + 1800000; }
+    throw err;
   }
   throw new Error(`Freebuff session rejected (${status || response.status}): ${JSON.stringify(data).slice(0, 200)}`);
 }
@@ -389,7 +393,7 @@ async function fetchSessionOffers(token, proxyOptions) {
     return cached.offers;
   }
 
-  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
+  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${ADMISSION_PATH}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
