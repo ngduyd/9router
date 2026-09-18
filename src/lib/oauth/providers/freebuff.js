@@ -26,11 +26,35 @@ import { FREEBUFF_CONFIG } from "../constants/oauth.js";
 // https://freebuff.com (www.codebuff.com would yield the wrong login link).
 const LOGIN_HOST = "https://freebuff.com";
 
+// P9: Cache proxyOptions per fingerprintId so pollToken can reuse the same
+// proxy that requestDeviceCode used — login + poll + chat exit from one IP.
+const loginProxyCache = new Map();
+
 const freebuff = {
   config: FREEBUFF_CONFIG,
   flowType: "device_code",
   requestDeviceCode: async (config, _codeChallenge, options = {}) => {
     const fingerprintId = `enhanced-${crypto.createHash("sha256").update(crypto.randomUUID()).digest("base64url")}`;
+    // P9: resolve proxy from proxyPoolId (frontend sends via query param)
+    let proxyOptions = null;
+    if (options?.proxyPoolId) {
+      try {
+        const { resolveConnectionProxyConfig } = await import("@/lib/network/connectionProxy");
+        const cfg = await resolveConnectionProxyConfig({ proxyPoolId: options.proxyPoolId });
+        if (cfg.connectionProxyEnabled && cfg.connectionProxyUrl) {
+          proxyOptions = {
+            connectionProxyEnabled: true,
+            connectionProxyUrl: cfg.connectionProxyUrl || "",
+            connectionNoProxy: cfg.connectionNoProxy || "",
+            vercelRelayUrl: cfg.vercelRelayUrl || "",
+            strictProxy: false,
+          } ?? null;
+        }
+      } catch {
+        // proxy resolution failed → fallback direct
+      }
+    }
+    // Cache for pollToken to reuse same proxy (set after fetch above)
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
     const response = await proxyAwareFetch(
       `${baseUrl}${config.loginCodePath || "/api/auth/cli/code"}`,
@@ -43,13 +67,16 @@ const freebuff = {
         },
         body: JSON.stringify({ fingerprintId }),
       },
-      options?.proxyOptions || null,
+      proxyOptions,
     );
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Freebuff login code request failed: ${error}`);
     }
     const data = await response.json();
+    // P9: cache proxy using server-returned fingerprintId (matches device_code key)
+    const resolvedFingerprintId = data?.fingerprintId || fingerprintId;
+    loginProxyCache.set(resolvedFingerprintId, { proxyOptions });
     const loginUrl = typeof data.loginUrl === "string" ? data.loginUrl : "";
     const authCode = loginUrl.match(/auth_code=([^&]+)/)?.[1] || "";
     const expiresAt = Number(data.expiresAt) || 0;
@@ -88,6 +115,10 @@ const freebuff = {
     if (!fingerprintId || !fingerprintHash || !expiresAt) {
       return { ok: true, data: { error: "authorization_pending" } };
     }
+    // P9: reuse proxy cached during requestDeviceCode (same IP for login + poll)
+    const cached = loginProxyCache.get(fingerprintId);
+    const effectiveProxy = proxyOptions ?? cached?.proxyOptions ?? null;
+    if (cached) loginProxyCache.delete(fingerprintId);
     // The status endpoint is a GET with query params; it returns 401
     // {"error":"Authentication failed"} while the device is still waiting for
     // the browser sign-in, and 200 { user } once authorized. Mirror the CLI:
@@ -104,7 +135,7 @@ const freebuff = {
           "User-Agent": "Bun/1.3.14",
         },
       },
-      proxyOptions,
+      effectiveProxy,
     );
     let data;
     try {

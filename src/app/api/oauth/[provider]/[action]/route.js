@@ -196,13 +196,15 @@ export async function GET(request, { params }) {
       const startUrl = searchParams.get("start_url");
       const region = searchParams.get("region");
       const authMethod = searchParams.get("auth_method");
-      const deviceOptions = provider === "kiro"
-        ? {
-            ...(startUrl ? { startUrl } : {}),
-            ...(region ? { region } : {}),
-            ...(authMethod ? { authMethod } : {}),
-          }
-        : undefined;
+      const proxyPoolId = searchParams.get("proxy_pool_id");
+      const deviceOptions = {
+        ...(provider === "kiro" ? {
+          ...(startUrl ? { startUrl } : {}),
+          ...(region ? { region } : {}),
+          ...(authMethod ? { authMethod } : {}),
+        } : {}),
+        ...(proxyPoolId ? { proxyPoolId } : {}),
+      };
       
       // Providers that don't use PKCE for device code (Grok CLI HAR: plain device_code, no challenge)
       const noPkceDeviceProviders = [
@@ -381,15 +383,35 @@ export async function POST(request, { params }) {
         return NextResponse.json({ error: "Missing device code" }, { status: 400 });
       }
 
+      // P9: resolve proxy for poll (frontend sends proxyPoolId in body)
+      let pollProxyOptions = null;
+      if (body?.proxyPoolId) {
+        try {
+          const { resolveConnectionProxyConfig } = await import("@/lib/network/connectionProxy");
+          const cfg = await resolveConnectionProxyConfig({ proxyPoolId: body.proxyPoolId });
+          if (cfg.connectionProxyEnabled && cfg.connectionProxyUrl) {
+            pollProxyOptions = {
+              connectionProxyEnabled: true,
+              connectionProxyUrl: cfg.connectionProxyUrl || "",
+              connectionNoProxy: cfg.connectionNoProxy || "",
+              vercelRelayUrl: cfg.vercelRelayUrl || "",
+              strictProxy: false,
+            } ?? null;
+          }
+        } catch {
+          // proxy resolution failed → fallback direct
+        }
+      }
+
       // Providers that don't use PKCE for device code
       const noPkceProviders = ["github", "kimi", "kimi-coding", "kilocode", "codebuddy-cn", "codebuddy-intl"];
       let result;
       if (noPkceProviders.includes(provider)) {
         // kimi needs extraData._kimiDeviceId for stable X-Msh-Device-Id (CLIProxyAPI parity)
-        result = await pollForToken(provider, deviceCode, null, extraData);
+        result = await pollForToken(provider, deviceCode, null, extraData, pollProxyOptions);
       } else if (provider === "kiro") {
         // Kiro needs extraData (clientId, clientSecret) from device code response
-        result = await pollForToken(provider, deviceCode, null, extraData);
+        result = await pollForToken(provider, deviceCode, null, extraData, pollProxyOptions);
       } else if (provider === "qoder") {
         // Qoder needs both the PKCE verifier (codeVerifier) and the machineId
         // captured at device-code time (extraData._qoderMachineId) so
@@ -397,13 +419,13 @@ export async function POST(request, { params }) {
         if (!codeVerifier) {
           return NextResponse.json({ error: "Missing code verifier" }, { status: 400 });
         }
-        result = await pollForToken(provider, deviceCode, codeVerifier, extraData);
+        result = await pollForToken(provider, deviceCode, codeVerifier, extraData, pollProxyOptions);
       } else {
         // Qwen and other PKCE providers
         if (!codeVerifier) {
           return NextResponse.json({ error: "Missing code verifier" }, { status: 400 });
         }
-        result = await pollForToken(provider, deviceCode, codeVerifier);
+        result = await pollForToken(provider, deviceCode, codeVerifier, undefined, pollProxyOptions);
       }
 
       if (result.success) {

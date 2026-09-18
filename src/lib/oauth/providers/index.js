@@ -155,13 +155,13 @@ export async function requestDeviceCode(providerName, codeChallenge, options) {
  * @param {string} codeVerifier - PKCE code verifier (optional for some providers)
  * @param {object} extraData - Extra data from device code response (e.g. clientId/clientSecret for Kiro)
  */
-export async function pollForToken(providerName, deviceCode, codeVerifier, extraData) {
+export async function pollForToken(providerName, deviceCode, codeVerifier, extraData, proxyOptions = null) {
   const provider = getProvider(providerName);
   if (provider.flowType !== "device_code") {
     throw new Error(`Provider ${providerName} does not support device code flow`);
   }
 
-  const result = await provider.pollToken(provider.config, deviceCode, codeVerifier, extraData);
+  const result = await provider.pollToken(provider.config, deviceCode, codeVerifier, extraData, proxyOptions);
 
   if (result.ok) {
     // For device code flows, success is only when we have an access token
