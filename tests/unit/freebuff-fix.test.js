@@ -30,13 +30,13 @@ beforeEach(() => {
 describe("freebuff transformRequest stream_options", () => {
   it("injects stream_options when stream=true", () => {
     const body = { messages: [{ role: "user", content: "hi" }] };
-    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, true, {});
+    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, true, { accessToken: "test-token" });
     expect(body.stream_options).toEqual({ include_usage: true });
   });
 
   it("does not inject stream_options when stream=false", () => {
     const body = { messages: [{ role: "user", content: "hi" }] };
-    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, false, {});
+    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, false, { accessToken: "test-token" });
     expect(body.stream_options).toBeUndefined();
   });
 
@@ -45,7 +45,7 @@ describe("freebuff transformRequest stream_options", () => {
       messages: [{ role: "user", content: "hi" }],
       stream_options: { include_usage: false },
     };
-    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, true, {});
+    EXECUTOR.transformRequest("deepseek/deepseek-v4-flash", body, true, { accessToken: "test-token" });
     expect(body.stream_options.include_usage).toBe(false);
   });
 });

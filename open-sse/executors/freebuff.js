@@ -4,7 +4,7 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
-import { getProviderConnectionById } from "../lib/db/repos/connectionsRepo.js";
+import { getProviderConnectionById } from "../../src/lib/db/repos/connectionsRepo.js";
 import {
   FETCH_CONNECT_TIMEOUT_MS,
   DEFAULT_RETRY_CONFIG,
@@ -631,9 +631,10 @@ export class FreebuffExecutor extends BaseExecutor {
     // run/session registration), so this only sets the static parts.
     // Fingerprint: derive deterministic hash from token, save to DB for reuse.
     // Prevents server-side account ban from multiple random fingerprints.
+    const token = credentials?.accessToken;
     const fingerprintId =
       credentials?.providerSpecificData?.fingerprintId ||
-      `enhanced-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
+      `enhanced-${createHash("sha256").update(String(token || "")).digest("hex").slice(0, 16)}`;
 
     body.codebuff_metadata = {
       client_id: fingerprintId,
