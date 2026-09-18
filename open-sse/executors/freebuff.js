@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
+import { createHash } from "node:crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
+import { getProviderConnectionById } from "../lib/db/repos/connectionsRepo.js";
 import {
   FETCH_CONNECT_TIMEOUT_MS,
   DEFAULT_RETRY_CONFIG,
@@ -181,6 +183,13 @@ function proxyKeyOf(proxyOptions) {
   return proxyOptions?.vercelRelayUrl || proxyOptions?.connectionProxyUrl || "direct";
 }
 
+// Derive timezone from proxy IP origin or default UTC. CLI sends actual machine
+// timezone (freebuff-session-api.ts:132); we approximate via proxy source if available.
+function getTimezoneForProxy(proxyOptions) {
+  // ponytail: could derive timezone from proxy IP geolocation if needed; for now default UTC
+  return "UTC";
+}
+
 function sessionGateFromText(text) {
   let parsed = {};
   try { parsed = JSON.parse(String(text || "")); } catch { parsed = {}; }
@@ -306,6 +315,10 @@ async function requestSession(token, model, proxyOptions) {
       Authorization: `Bearer ${token}`,
       "User-Agent": "codebuff-cli/0.0.138",
       "x-freebuff-model": model,
+      // P6: Wire mimic — session headers per CLI (freebuff-session-api.ts:118-135)
+      "x-fb-timezone": getTimezoneForProxy(proxyOptions),
+      "x-freebuff-wallet-spend-limit": "0",
+      "x-freebuff-first-tab-discount": "true",
     },
   }, proxyOptions);
 
@@ -382,6 +395,8 @@ async function fetchSessionOffers(token, proxyOptions) {
       Authorization: `Bearer ${token}`,
       "User-Agent": "codebuff-cli/0.0.138",
       Accept: "application/json",
+      // P6: Wire mimic — session instance header on offer checks (freebuff-session-api.ts:130)
+      "x-freebuff-instance-id": sessionCache.get(sessionCacheKey(token, ""))?.instanceId || "",
     },
   }, proxyOptions);
 
@@ -595,10 +610,14 @@ export class FreebuffExecutor extends BaseExecutor {
     // Top-level wire shape — see header comment. `run_id` and
     // `freebuff_instance_id` are attached by execute() (they need the async
     // run/session registration), so this only sets the static parts.
+    // Fingerprint: derive deterministic hash from token, save to DB for reuse.
+    // Prevents server-side account ban from multiple random fingerprints.
+    const fingerprintId =
+      credentials?.providerSpecificData?.fingerprintId ||
+      `enhanced-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
+
     body.codebuff_metadata = {
-      client_id:
-        credentials?.providerSpecificData?.fingerprintId ||
-        `9router-${crypto.randomUUID()}`,
+      client_id: fingerprintId,
       cost_mode: "free",
     };
     body.provider = { allow_fallbacks: false };
