@@ -346,7 +346,7 @@ async function requestSession(token, model, proxyOptions, actingUserId = null) {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      "User-Agent": "codebuff-cli/0.0.138",
+      "User-Agent": "Bun/1.3.14",
       "x-freebuff-model": model,
       // P6: Wire mimic — session headers per CLI (freebuff-session-api.ts:118-135)
       "x-fb-timezone": getTimezoneForProxy(proxyOptions),
@@ -445,7 +445,7 @@ async function fetchSessionOffers(token, proxyOptions) {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
-      "User-Agent": "codebuff-cli/0.0.138",
+      "User-Agent": "Bun/1.3.14",
       Accept: "application/json",
       // P6: Wire mimic — session instance header on offer checks (freebuff-session-api.ts:130)
       "x-freebuff-instance-id": sessionCache.get(sessionCacheKey(token, ""))?.instanceId || "",
@@ -535,7 +535,7 @@ async function startRun(token, model, proxyOptions, actingUserId = null) {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      "User-Agent": "codebuff-cli/0.0.138",
+      "User-Agent": "Bun/1.3.14",
       ...(actingUserId && { "x-freebuff-acting-user-id": actingUserId }),
     },
     body: JSON.stringify({
@@ -574,7 +574,7 @@ async function finishRun(token, runId, status, proxyOptions, actingUserId = null
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
-        "User-Agent": "codebuff-cli/0.0.138",
+        "User-Agent": "Bun/1.3.14",
         ...(actingUserId && { "x-freebuff-acting-user-id": actingUserId }),
       },
       body: JSON.stringify({ action: "FINISH", runId, status }),

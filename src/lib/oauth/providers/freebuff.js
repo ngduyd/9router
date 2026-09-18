@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { proxyAwareFetch } from "../../../../open-sse/utils/proxyFetch.js";
 import { FREEBUFF_CONFIG } from "../constants/oauth.js";
 
 /**
@@ -31,7 +32,7 @@ const freebuff = {
   requestDeviceCode: async (config) => {
     const fingerprintId = crypto.randomUUID();
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
-    const response = await fetch(
+    const response = await proxyAwareFetch(
       `${baseUrl}${config.loginCodePath || "/api/auth/cli/code"}`,
       {
         method: "POST",
@@ -93,7 +94,7 @@ const freebuff = {
     // own 5-minute deadline).
     const baseUrl = (config.baseUrl || LOGIN_HOST).replace(/\/$/, "");
     const query = new URLSearchParams({ fingerprintId, fingerprintHash, expiresAt: String(expiresAt) });
-    const response = await fetch(
+    const response = await proxyAwareFetch(
       `${baseUrl}${config.loginStatusPath || "/api/auth/cli/status"}?${query.toString()}`,
       {
         method: "GET",

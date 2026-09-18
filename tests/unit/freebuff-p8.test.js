@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const fetchMock = vi.fn();
-vi.stubGlobal("fetch", fetchMock);
+vi.mock("open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: (...args) => fetchMock(...args),
+}));
 
 import { FreebuffExecutor } from "../../open-sse/executors/freebuff.js";
 
