@@ -4,7 +4,6 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
-import { getProviderConnectionById } from "../lib/db/repos/connectionsRepo.js";
 import {
   FETCH_CONNECT_TIMEOUT_MS,
   DEFAULT_RETRY_CONFIG,
@@ -36,6 +35,7 @@ import { getFreebuffModels, preCheckCredits } from "../services/freebuffModels.j
  * codebuff_metadata.freebuff_instance_id.
  */
 const SESSION_PATH = "/api/v1/freebuff/session";
+const ADMISSION_PATH = "/api/v1/freebuff/session/admission";
 const RUN_PATH = "/api/v1/agent-runs";
 const SESSION_DEFAULT_TTL_MS = 60 * 60 * 1000; // active sessions live ~1h
 
@@ -308,7 +308,7 @@ async function requestSession(token, model, proxyOptions) {
     throw err;
   }
 
-  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
+  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${ADMISSION_PATH}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -612,9 +612,10 @@ export class FreebuffExecutor extends BaseExecutor {
     // run/session registration), so this only sets the static parts.
     // Fingerprint: derive deterministic hash from token, save to DB for reuse.
     // Prevents server-side account ban from multiple random fingerprints.
+    const accessToken = credentials?.accessToken || '';
     const fingerprintId =
       credentials?.providerSpecificData?.fingerprintId ||
-      `enhanced-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
+      `enhanced-${createHash("sha256").update(accessToken).digest('hex').slice(0, 16)}`;
 
     body.codebuff_metadata = {
       client_id: fingerprintId,
