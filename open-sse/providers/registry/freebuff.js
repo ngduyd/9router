@@ -45,7 +45,7 @@ export default {
     baseUrl: "https://www.codebuff.com/api/v1/chat/completions",
     format: "openai",
     headers: {
-      "User-Agent": "ai-sdk/openai-compatible/1.0/codebuff",
+      "User-Agent": "ai-sdk/openai-compatible/0.0.0-test/codebuff ai-sdk/provider-utils/3.0.25 runtime/browser",
     },
     retry: {
       429: { attempts: 2, delayMs: 2000 },

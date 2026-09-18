@@ -148,12 +148,14 @@ const fbState = (globalThis[FB_STATE_KEY] ??= {
   modelLockCooldowns: new Map(), // `${token}::${model}` -> expiresAt (ms)
   poolLimitCooldowns: new Map(), // `${proxyKey}::${model}` -> expiresAt (ms)
   offerCache: new Map(),        // `${token}` -> { fetchedAt, offers: [] } (limited-offer rows)
+  meCache: new Map(),           // `${token}` -> userId (resolved via GET /api/v1/me)
 });
 const sessionCache = fbState.sessionCache;
 const inflight = fbState.inflight;
 const modelLockCooldowns = fbState.modelLockCooldowns;
 const poolLimitCooldowns = fbState.poolLimitCooldowns;
 const offerCache = fbState.offerCache;
+const meCache = fbState.meCache;
 
 const MODEL_LOCK_COOLDOWN_MS = 10 * 60 * 1000; // session bound to another model (~1h) — re-check every 10 min
 const POOL_LIMITED_COOLDOWN_MS = 5 * 60 * 1000; // IP tier refuses this model — try a different pool/relay
@@ -260,6 +262,28 @@ function throwSessionGateError(gate, { token, model, proxyKey, poolId, log }) {
   }
 }
 
+// P7.1: Resolve acting-user-id via GET /api/v1/me?fields=id (cached per token).
+// CLI sends this header on agent-runs + chat; the server uses it for identity.
+async function resolveActingUserId(token, proxyOptions) {
+  const cached = meCache.get(token);
+  if (cached !== undefined) return cached || null;
+  try {
+    const res = await fetchWithNetworkRetry(
+      `${sessionOrigin()}/api/v1/me?fields=id`,
+      { method: "GET", headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+      proxyOptions, 2, 5000,
+    );
+    if (!res.ok) { meCache.set(token, ""); return null; }
+    const data = await res.json().catch(() => ({}));
+    const id = data?.id || "";
+    meCache.set(token, id);
+    return id || null;
+  } catch {
+    meCache.set(token, "");
+    return null;
+  }
+}
+
 function sessionOrigin() {
   return new URL(PROVIDERS.freebuff.baseUrl).origin; // https://www.codebuff.com
 }
@@ -295,7 +319,10 @@ async function fetchWithNetworkRetry(url, options, proxyOptions, attempts = 3, t
   throw lastError;
 }
 
-async function requestSession(token, model, proxyOptions) {
+// resolveActingUserId is defined earlier (after throwSessionGateError).
+// This block removed — keep single definition using fbState.meCache.
+
+async function requestSession(token, model, proxyOptions, actingUserId = null) {
   // Offer-gated models (Fable) refuse claims while their wave pool is closed —
   // checked before the POST so a closed offer never burns a claim attempt.
   await guardOfferClaim(token, model, proxyOptions);
@@ -325,6 +352,7 @@ async function requestSession(token, model, proxyOptions) {
       "x-fb-timezone": getTimezoneForProxy(proxyOptions),
       "x-freebuff-wallet-spend-limit": "0",
       "x-freebuff-first-tab-discount": "0",
+      ...(actingUserId && { "x-freebuff-acting-user-id": actingUserId }),
     },
   }, proxyOptions);
 
@@ -477,7 +505,7 @@ async function guardOfferClaim(token, model, proxyOptions) {
   return offer;
 }
 
-async function ensureSession(token, model, proxyOptions, force = false) {
+async function ensureSession(token, model, proxyOptions, force = false, actingUserId = null) {
   const key = sessionCacheKey(token, model);
   // Lazy prune: drop stale rows so the cache never accumulates expired entries.
   const cached = sessionCache.get(key);
@@ -492,22 +520,23 @@ async function ensureSession(token, model, proxyOptions, force = false) {
     // race a stale one back into the cache.
     sessionCache.delete(key);
     inflight.delete(key);
-    return requestSession(token, model, proxyOptions);
+    return requestSession(token, model, proxyOptions, actingUserId);
   }
   if (!inflight.has(key)) {
-    inflight.set(key, requestSession(token, model, proxyOptions).finally(() => inflight.delete(key)));
+    inflight.set(key, requestSession(token, model, proxyOptions, actingUserId).finally(() => inflight.delete(key)));
   }
   return inflight.get(key);
 }
 
 // Register an agent run so the chat backend can resolve the run_id we send.
-async function startRun(token, model, proxyOptions) {
+async function startRun(token, model, proxyOptions, actingUserId = null) {
   const response = await fetchWithNetworkRetry(`${sessionOrigin()}${RUN_PATH}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       "User-Agent": "codebuff-cli/0.0.138",
+      ...(actingUserId && { "x-freebuff-acting-user-id": actingUserId }),
     },
     body: JSON.stringify({
       action: "START",
@@ -537,7 +566,7 @@ async function startRun(token, model, proxyOptions) {
 }
 
 // Best-effort run completion — mirrors the CLI's finishAgentRun. Never throws.
-async function finishRun(token, runId, status, proxyOptions) {
+async function finishRun(token, runId, status, proxyOptions, actingUserId = null) {
   if (!runId) return;
   try {
     await proxyAwareFetch(`${sessionOrigin()}${RUN_PATH}`, {
@@ -546,6 +575,7 @@ async function finishRun(token, runId, status, proxyOptions) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
         "User-Agent": "codebuff-cli/0.0.138",
+        ...(actingUserId && { "x-freebuff-acting-user-id": actingUserId }),
       },
       body: JSON.stringify({ action: "FINISH", runId, status }),
       signal: AbortSignal.timeout(10_000),
@@ -559,6 +589,7 @@ export function resetSessionCache() {
   sessionCache.clear();
   inflight.clear();
   offerCache.clear();
+  meCache.clear();
 }
 
 // Snapshot sizes of in-memory freebuff state (for the dashboard memory panel).
@@ -645,15 +676,11 @@ export class FreebuffExecutor extends BaseExecutor {
     // Fingerprint: derive deterministic hash from token, save to DB for reuse.
     // Prevents server-side account ban from multiple random fingerprints.
     const token = credentials?.accessToken;
-    const fingerprintId =
-      credentials?.providerSpecificData?.fingerprintId ||
-      `enhanced-${createHash("sha256").update(String(token || "")).digest("hex").slice(0, 16)}`;
-
     body.codebuff_metadata = {
-      client_id: fingerprintId,
+      client_id: crypto.randomBytes(8).toString("base64url").slice(0, 11),
       cost_mode: "free",
     };
-    body.provider = { allow_fallbacks: false };
+    body.provider = { data_collection: "deny" };
     // Backend only returns the final usage SSE event when the client asks via
     // stream_options.include_usage; without it onStreamComplete sees usage=null.
     if (stream && !body.stream_options) {
@@ -676,6 +703,8 @@ export class FreebuffExecutor extends BaseExecutor {
     if (!token) {
       throw new Error("Freebuff requires a connected Freebuff login (no access token found)");
     }
+    // P7.1: Resolve acting user ID for x-freebuff-acting-user-id header
+    const actingUserId = await resolveActingUserId(token, proxyOptions).catch(() => null);
 
     // Fail fast while a known-dead (account,model) / (proxy,model) pair is in
     // cooldown — no session claim, no run registration, no upstream spam.
@@ -699,7 +728,7 @@ export class FreebuffExecutor extends BaseExecutor {
 
     let session;
     try {
-      session = await ensureSession(token, model, proxyOptions);
+      session = await ensureSession(token, model, proxyOptions, false, actingUserId);
     } catch (error) {
       const gate = sessionGateFromError(error);
       if (gate) throwSessionGateError(gate, { token, model, proxyKey, poolId, log });
@@ -709,6 +738,8 @@ export class FreebuffExecutor extends BaseExecutor {
 
     const url = this.buildUrl();
     const headers = this.buildHeaders(credentials, stream);
+    // P7.1: Wire mimic — acting-user-id header on chat (same as agent-runs)
+    if (actingUserId) headers["x-freebuff-acting-user-id"] = actingUserId;
     const retryConfig = { ...DEFAULT_RETRY_CONFIG, ...this.config.retry };
 
     // Registered run whose id the backend resolves on chat. Per-request, like
@@ -718,12 +749,24 @@ export class FreebuffExecutor extends BaseExecutor {
     let runId = null;
     const traceSessionId = crypto.randomUUID();
 
+    let llmStepCounter = 0;
     const buildBody = () => {
       const transformed = this.transformRequest(model, body, stream, credentials);
       transformed.codebuff_metadata.run_id = runId;
       transformed.codebuff_metadata.trace_session_id = traceSessionId;
       if (session?.instanceId) {
         transformed.codebuff_metadata.freebuff_instance_id = session.instanceId;
+      }
+      // P7.5: stop token (CLI sends for SSE stream termination)
+      if (!transformed.stop) transformed.stop = ['"cb_easp"'];
+      // P7.5: repo snapshot — stub when no workspace context
+      if (!transformed.codebuff_metadata.repo_snapshot) {
+        transformed.codebuff_metadata.repo_snapshot = '{}';
+      }
+      // P7.5: step counter per run
+      if (!transformed.codebuff_metadata.llm_step_number) {
+        llmStepCounter += 1;
+        transformed.codebuff_metadata.llm_step_number = String(llmStepCounter);
       }
       return transformed;
     };
@@ -779,12 +822,12 @@ export class FreebuffExecutor extends BaseExecutor {
       if (!activeRunId) return;
       const id = activeRunId;
       activeRunId = null;
-      finishRun(token, id, status, proxyOptions);
+      finishRun(token, id, status, proxyOptions, actingUserId);
     };
 
     try {
       try {
-        runId = await startRun(token, model, proxyOptions);
+        runId = await startRun(token, model, proxyOptions, actingUserId);
         activeRunId = runId;
       } catch (error) {
         log?.error?.("AUTH", `Freebuff run start failed: ${error.message}`);
@@ -812,8 +855,8 @@ export class FreebuffExecutor extends BaseExecutor {
         log?.debug?.("AUTH", `Freebuff ${response.status} session gate — re-claiming session`);
         markFinished("cancelled");
         try {
-          session = await ensureSession(token, model, proxyOptions, true);
-          runId = await startRun(token, model, proxyOptions);
+          session = await ensureSession(token, model, proxyOptions, true, actingUserId);
+          runId = await startRun(token, model, proxyOptions, actingUserId);
           activeRunId = runId;
         } catch (error) {
           const gate2 = sessionGateFromError(error);
@@ -861,7 +904,7 @@ export class FreebuffExecutor extends BaseExecutor {
     } finally {
       // Never leave the current run dangling on thrown paths (network/abort/gate).
       if (activeRunId) {
-        finishRun(token, activeRunId, "failed", proxyOptions);
+        finishRun(token, activeRunId, "failed", proxyOptions, actingUserId);
       }
     }
   }
