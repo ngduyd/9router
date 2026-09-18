@@ -38,7 +38,7 @@ const freebuff = {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
-          "User-Agent": "codebuff-cli/0.0.138",
+          "User-Agent": "Bun/1.3.14",
         },
         body: JSON.stringify({ fingerprintId }),
       },
@@ -99,7 +99,7 @@ const freebuff = {
         method: "GET",
         headers: {
           Accept: "application/json",
-          "User-Agent": "codebuff-cli/0.0.138",
+          "User-Agent": "Bun/1.3.14",
         },
       },
     );
@@ -115,17 +115,26 @@ const freebuff = {
     }
     return { ok: true, data: { error: "authorization_pending" } };
   },
-  mapTokens: (tokens) => ({
-    accessToken: tokens.access_token,
-    refreshToken: null,
-    email: tokens.email || undefined,
-    displayName: tokens.name || undefined,
-    providerSpecificData: {
-      authMethod: "device_code",
-      fingerprintId: tokens.fingerprintId || null,
-      userId: tokens.id || null,
-    },
-  }),
+  mapTokens: (tokens) => {
+    // P8.2: derive deterministic device fingerprint from userId (or token fallback).
+    // CLI uses sha256(machineId+MAC+sysinfo) → enhanced-{base64url}; we approximate
+    // with the stable userId so the same account always produces the same fingerprint.
+    const seed = String(tokens.id || tokens.access_token || "");
+    const fingerprintId = seed
+      ? `enhanced-${crypto.createHash("sha256").update(seed).digest("base64url")}`
+      : null;
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: null,
+      email: tokens.email || undefined,
+      displayName: tokens.name || undefined,
+      providerSpecificData: {
+        authMethod: "device_code",
+        fingerprintId: fingerprintId || tokens.fingerprintId || null,
+        userId: tokens.id || null,
+      },
+    };
+  },
 };
 
 export default freebuff;

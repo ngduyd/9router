@@ -186,8 +186,14 @@ function proxyKeyOf(proxyOptions) {
 // Derive timezone from proxy IP origin or default UTC. CLI sends actual machine
 // timezone (freebuff-session-api.ts:132); we approximate via proxy source if available.
 function getTimezoneForProxy(proxyOptions) {
-  // ponytail: could derive timezone from proxy IP geolocation if needed; for now default UTC
-  return "UTC";
+  // ponytail: could derive timezone from proxy IP geolocation if needed;
+  // static config per proxy pool is the ideal path (proxy VN → Asia/Ho_Chi_Minh, …).
+  // For now use the server's real timezone — still more accurate than UTC hardcode.
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 function sessionGateFromText(text) {
