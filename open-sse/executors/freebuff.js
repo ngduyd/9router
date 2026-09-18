@@ -4,6 +4,7 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
+import { getProviderConnectionById } from "../lib/db/repos/connectionsRepo.js";
 import {
   FETCH_CONNECT_TIMEOUT_MS,
   DEFAULT_RETRY_CONFIG,
@@ -34,8 +35,8 @@ import { getFreebuffModels, preCheckCredits } from "../services/freebuffModels.j
  * claims a row (bound to one model, ~1h); its instance id must ride along as
  * codebuff_metadata.freebuff_instance_id.
  */
-const SESSION_PATH = "/api/v1/freebuff/session";
-const ADMISSION_PATH = "/api/v1/freebuff/session/admission";
+const SESSION_PATH = "/api/v1/freebuff/session/admission";
+const ADMISSION_PATH = "/api/v1/freebuff/session/admission"; // P6: explicit admission handshake (freebuff-session-api.ts:118-135)
 const RUN_PATH = "/api/v1/agent-runs";
 const SESSION_DEFAULT_TTL_MS = 60 * 60 * 1000; // active sessions live ~1h
 
@@ -362,10 +363,28 @@ async function requestSession(token, model, proxyOptions) {
     return { instanceId: null, status: "none" };
   }
 
+  // Fatal statuses — dedicated codes + flags so retry logic skips them.
+  if (status === "banned") {
+    const err = new Error(`Freebuff account banned${data?.message ? `: ${data.message}` : ""}`);
+    err.status = 403;
+    err.isBanned = true;
+    err.resetsAtMs = Date.now() + SESSION_DEFAULT_TTL_MS;
+    throw err;
+  }
+  if (status === "country_blocked") {
+    const err = new Error(`Freebuff is not available in your country${data?.message ? `: ${data.message}` : ""}`);
+    err.status = 451;
+    err.isGeoBlocked = true;
+    throw err;
+  }
+  if (status === "ip_capped") {
+    const err = new Error(`Freebuff IP cap reached — try again later${data?.message ? `: ${data.message}` : ""}`);
+    err.status = 429;
+    err.isIpCapped = true;
+    err.resetsAtMs = Date.now() + 30 * 60 * 1000;
+    throw err;
+  }
   const GATE_MESSAGES = {
-    country_blocked: "Freebuff is not available in your region (country blocked).",
-    banned: "Your Freebuff account has been banned.",
-    ip_capped: "Freebuff IP cap reached — try again later.",
     rate_limited: "Freebuff session limit reached for this model — try again later.",
     spend_limited: "Freebuff spend limit reached — add credits or wait for the window to reset.",
     model_locked: "Freebuff session is locked to another model — end it in the CLI or wait for it to expire.",
@@ -374,11 +393,7 @@ async function requestSession(token, model, proxyOptions) {
   };
   if (GATE_MESSAGES[status]) {
     const message = data?.message ? `${GATE_MESSAGES[status]} ${data.message}` : GATE_MESSAGES[status];
-    const err = new Error(message);
-    if (status === 'banned') { err.status = 403; err.isBanned = true; err.resetsAtMs = Date.now() + 3600000; }
-    if (status === 'country_blocked') { err.status = 451; err.isGeoBlocked = true; }
-    if (status === 'ip_capped') { err.status = 429; err.isIpCapped = true; err.resetsAtMs = Date.now() + 1800000; }
-    throw err;
+    throw new Error(message);
   }
   throw new Error(`Freebuff session rejected (${status || response.status}): ${JSON.stringify(data).slice(0, 200)}`);
 }
@@ -393,7 +408,7 @@ async function fetchSessionOffers(token, proxyOptions) {
     return cached.offers;
   }
 
-  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${ADMISSION_PATH}`, {
+  const response = await fetchWithNetworkRetry(`${sessionOrigin()}${SESSION_PATH}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -616,10 +631,9 @@ export class FreebuffExecutor extends BaseExecutor {
     // run/session registration), so this only sets the static parts.
     // Fingerprint: derive deterministic hash from token, save to DB for reuse.
     // Prevents server-side account ban from multiple random fingerprints.
-    const accessToken = credentials?.accessToken || '';
     const fingerprintId =
       credentials?.providerSpecificData?.fingerprintId ||
-      `enhanced-${createHash("sha256").update(accessToken).digest('hex').slice(0, 16)}`;
+      `enhanced-${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
 
     body.codebuff_metadata = {
       client_id: fingerprintId,
