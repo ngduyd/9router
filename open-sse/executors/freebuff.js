@@ -670,6 +670,9 @@ export class FreebuffExecutor extends BaseExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
+    // Strip provider prefix — upstream expects bare model name (e.g.
+    // "z-ai/glm-5.3-flash", not "fb/z-ai/glm-5.3-flash").
+    body.model = model;
     // Top-level wire shape — see header comment. `run_id` and
     // `freebuff_instance_id` are attached by execute() (they need the async
     // run/session registration), so this only sets the static parts.
