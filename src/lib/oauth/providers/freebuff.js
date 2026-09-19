@@ -34,7 +34,18 @@ const freebuff = {
   config: FREEBUFF_CONFIG,
   flowType: "device_code",
   requestDeviceCode: async (config, _codeChallenge, options = {}) => {
-    const fingerprintId = `enhanced-${crypto.createHash("sha256").update(crypto.randomUUID()).digest("base64url")}`;
+    // Reuse existing fingerprint from DB if available (same account = same device).
+    // CLI uses hardware hash; we derive from userId in mapTokens and persist.
+    let fingerprintId;
+    try {
+      const { getProviderConnections } = await import("@/lib/db/index.js");
+      const conns = await getProviderConnections();
+      const existing = conns.find(c => c.provider === "freebuff" && c.providerSpecificData?.fingerprintId);
+      fingerprintId = existing?.providerSpecificData?.fingerprintId || null;
+    } catch { /* db not ready */ }
+    if (!fingerprintId) {
+      fingerprintId = `enhanced-${crypto.createHash("sha256").update(crypto.randomUUID()).digest("base64url")}`;
+    }
     // P9: resolve proxy from proxyPoolId (frontend sends via query param)
     let proxyOptions = null;
     if (options?.proxyPoolId) {
