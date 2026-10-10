@@ -127,8 +127,6 @@ export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 // Endpoint: cli-chat-proxy.grok.com — same client_id as xai, different flow + scopes
 export const GROK_CLI_CONFIG = { ...PROVIDER_OAUTH["grok-cli"] };
 
-// Freebuff OAuth Configuration (Fingerprint Device-Code Flow)
-export const FREEBUFF_CONFIG = { ...PROVIDER_OAUTH["freebuff"] };
 
 // Muse — subscription device code flow to auth.meta.com, no refresh
 // (Meta rejects refresh_token grants; the minted Model API key never expires).

@@ -876,7 +876,7 @@ case "llm7": {
         return { valid: res.ok, error: res.ok ? null : "Invalid API key", refreshed: false };
       }
       default:
-        // Try OAuth probe (e.g. freebuff) before rejecting as unsupported
+        // Try OAuth probe before rejecting as unsupported
         break;
     }
   } catch (err) {
@@ -886,39 +886,6 @@ case "llm7": {
   // Fall through: check if the provider has an OAuth test config
   return { valid: false, error: "Provider test not supported" };
 }
-
-// --- Freebuff OAuth probe (device-code fingerprint flow, not standard OAuth) ---
-// Separate from OAUTH_TEST_CONFIG because the test endpoint differs per flow type.
-async function testFreebuffConnection(connection, effectiveProxy) {
-  const token = connection.accessToken;
-  if (!token) return { valid: false, error: "No access token" };
-  try {
-    const res = await fetchWithConnectionProxy("https://www.codebuff.com/api/v1/freebuff/session", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "User-Agent": "Bun/1.3.14",
-        Accept: "application/json",
-      },
-    }, effectiveProxy);
-    if (res.ok) return { valid: true, error: null };
-    if (res.status === 401) return { valid: false, error: "Token invalid or expired — re-login" };
-    if (res.status === 403) return { valid: true, error: "Connected but region-gated", soft: true };
-    if (res.status === 404) return { valid: true, error: null }; // No active session = valid
-    return { valid: false, error: `API returned ${res.status}` };
-  } catch (err) {
-    return { valid: false, error: err.message };
-  }
-}
-
-// Patch testApiKeyConnection to also handle freebuff
-const _originalTestApiKeyConnection = testApiKeyConnection;
-testApiKeyConnection = async function(connection, effectiveProxy) {
-  if (connection.provider === "freebuff") {
-    return testFreebuffConnection(connection, effectiveProxy);
-  }
-  return _originalTestApiKeyConnection(connection, effectiveProxy);
-};
 
 /**
  * Test a single connection by ID, update DB, and return result.
@@ -947,8 +914,6 @@ export async function testSingleConnection(id) {
 
   if (connection.authType === "apikey" || connection.authType === "cookie") {
     result = await testApiKeyConnection(connection, effectiveProxy);
-  } else if (connection.provider === "freebuff") {
-    result = await testFreebuffConnection(connection, effectiveProxy);
   } else {
     result = await testOAuthConnection(connection, effectiveProxy);
   }

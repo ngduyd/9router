@@ -267,7 +267,6 @@ export async function GET(request, { params }) {
         "qoder",
         "qoder-cn",
         "grok-cli",
-        "freebuff",
         "muse",
         "glm",
       ];

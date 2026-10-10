@@ -2,13 +2,13 @@
 //
 // Rotation strategies can opt into region/provider-aware pool selection: an
 // executor that learns a pool's egress is unfit for a provider/model (e.g.
-// Freebuff limited-mode IP) marks it here, and the pool picker skips it for
+// a limited-mode IP) marks it here, and the pool picker skips it for
 // that scope until the cooldown expires.
 //
-// Scope format: `provider::model` (e.g. "freebuff::openai/gpt-5.6-luna").
+// Scope format: `provider::model` (e.g. "openrouter::openai/gpt-5.6-luna").
 // All functions are fail-open: unknown pool/scope ⇒ fit.
 
-// Scope format: `provider::model` (e.g. "freebuff::openai/gpt-5.6-luna").
+// Scope format: `provider::model` (e.g. "openrouter::openai/gpt-5.6-luna").
 // All functions are fail-open: unknown pool/scope ⇒ fit.
 //
 // State lives on globalThis so Next dev (Turbopack) never splits one Map into
