@@ -3,6 +3,8 @@ import { ProxyAgent, fetch as undiciFetch } from "undici";
 const DEFAULT_TEST_URL = "https://google.com/";
 const DEFAULT_TIMEOUT_MS = 8000;
 
+const RELAY_POOL_TYPES = new Set(["vercel", "cloudflare", "deno", "netlify"]);
+
 function getErrorMessage(err) {
   if (!err) return "Unknown error";
   const base = err?.message || String(err);
@@ -88,4 +90,42 @@ export async function testProxyUrl({ proxyUrl, testUrl, timeoutMs } = {}) {
       // ignore
     }
   }
+}
+
+export async function testVercelRelay(relayUrl, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await undiciFetch(relayUrl, {
+      method: "GET",
+      headers: {
+        "x-relay-target": "https://httpbin.org",
+        "x-relay-path": "/get",
+      },
+      signal: controller.signal,
+    });
+    return {
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      elapsedMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      error: err?.name === "AbortError" ? "Relay test timed out" : (err?.message || String(err)),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Test a single pool: relay-type pools use the relay endpoint, others use a HEAD request via the proxy.
+export async function testProxyPool(pool) {
+  if (pool && RELAY_POOL_TYPES.has(pool.type)) {
+    return testVercelRelay(pool.proxyUrl);
+  }
+  return testProxyUrl({ proxyUrl: pool?.proxyUrl });
 }

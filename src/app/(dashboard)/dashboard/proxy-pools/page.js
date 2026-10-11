@@ -51,6 +51,9 @@ export default function ProxyPoolsPage() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [healthChecking, setHealthChecking] = useState(false);
   const [healthProgress, setHealthProgress] = useState({ current: 0, total: 0 });
+  const [hcEnabled, setHcEnabled] = useState(false);
+  const [hcInterval, setHcInterval] = useState(5);
+  const [savingHealth, setSavingHealth] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const relayMenuRef = useRef(null);
@@ -85,6 +88,20 @@ export default function ProxyPoolsPage() {
   useEffect(() => {
     fetchProxyPools();
   }, [fetchProxyPools]);
+
+  useEffect(() => {
+    fetch("/api/settings", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        const hc = data?.proxyHealthCheck;
+        if (hc) {
+          setHcEnabled(hc.enabled === true);
+          const minutes = Number(hc.intervalMinutes);
+          setHcInterval(Number.isFinite(minutes) ? Math.min(60, Math.max(1, minutes)) : 5);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const resetForm = () => {
     setEditingProxyPool(null);
@@ -264,6 +281,30 @@ export default function ProxyPoolsPage() {
         }
       }
     });
+  };
+
+  const handleSaveHealthCheck = async () => {
+    setSavingHealth(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proxyHealthCheck: { enabled: hcEnabled, intervalMinutes: hcInterval },
+        }),
+      });
+      if (res.ok) {
+        notify.success("Auto health check saved");
+      } else {
+        const data = await res.json();
+        notify.error(data.error || "Failed to save auto health check");
+      }
+    } catch (error) {
+      console.log("Error saving auto health check:", error.message);
+      notify.error("Failed to save auto health check");
+    } finally {
+      setSavingHealth(false);
+    }
   };
 
   const handleHealthCheck = async () => {
@@ -698,6 +739,28 @@ export default function ProxyPoolsPage() {
           )}
           <Badge variant="default">Total: {proxyPools.length}</Badge>
           <Badge variant="success">Active: {activeCount}</Badge>
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border/50 px-3 py-2">
+          <Toggle
+            size="sm"
+            checked={hcEnabled}
+            onChange={(next) => setHcEnabled(next)}
+            label="Auto health check"
+          />
+          <span className="text-xs text-text-muted">every</span>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={hcInterval}
+            onChange={(e) => setHcInterval(Math.min(60, Math.max(1, Number(e.target.value) || 1)))}
+            className="w-16 rounded-md border border-black/10 bg-white px-2 py-1 text-sm text-text-main dark:border-white/10 dark:bg-white/5"
+          />
+          <span className="text-xs text-text-muted">min</span>
+          <Button size="sm" variant="secondary" onClick={handleSaveHealthCheck} disabled={savingHealth}>
+            {savingHealth ? "Saving..." : "Save"}
+          </Button>
         </div>
 
         {(selectedIds.length > 0 || healthChecking) && (

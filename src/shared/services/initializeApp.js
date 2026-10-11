@@ -113,6 +113,11 @@ async function runHeavyStartup() {
       .catch((e) => console.log("[AutoPing] scheduler start failed:", e.message));
   }
 
+  // Periodic proxy health check (auto enable/disable pools by test result).
+  import("@/shared/services/proxyHealthCheck")
+    .then(({ configureProxyHealthCheck }) => configureProxyHealthCheck(settings))
+    .catch((e) => console.log("[ProxyHealthCheck] scheduler start failed:", e.message));
+
   // Proactive OAuth token refresh (e.g. grok-cli ~6h TTL). Module is idempotent
   // and also started from custom-server.js when that entry is used.
   import("@/sse/services/backgroundTokenRefresh.js")

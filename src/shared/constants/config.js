@@ -92,6 +92,15 @@ export const QUOTA_AUTOPING_CONFIG = {
   },
 };
 
+// Proxy health check: periodic auto-test of all proxy pools.
+export const PROXY_HEALTH_CHECK_CONFIG = {
+  defaultIntervalMinutes: 5,
+  minIntervalMinutes: 1,
+  maxIntervalMinutes: 60,
+  slowThresholdMs: 4000,
+  concurrency: 5,
+};
+
 // Re-export from providers.js for backward compatibility
 export {
   FREE_PROVIDERS,
