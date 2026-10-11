@@ -40,7 +40,7 @@ describe("opencode Free tool_choice auto-only", () => {
       const out = new OpenCodeExecutor().transformRequest(model, body, true, CREDS);
       expect(out.tool_choice).toBe("auto");
       // Cloak: original tool preserved + bash/read decoys (prevents 403 FreeTierError)
-      expect(out.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+      expect(out.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "glob", "grep", "read"]);
       expect(out.input).toEqual(INPUT);
     }
   });
@@ -50,7 +50,7 @@ describe("opencode Free tool_choice auto-only", () => {
       FREE_13, responsesBody(FREE_13, "auto"), true, CREDS,
     );
     expect(autoOut.tool_choice).toBe("auto");
-    expect(autoOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(autoOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "glob", "grep", "read"]);
     expect(autoOut.input).toEqual(INPUT);
 
     const absentOut = new OpenCodeExecutor().transformRequest(
@@ -58,7 +58,7 @@ describe("opencode Free tool_choice auto-only", () => {
     );
     // Cloak defaults missing choice to auto so upstream never sees absent + tools
     expect(absentOut.tool_choice).toBe("auto");
-    expect(absentOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(absentOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "glob", "grep", "read"]);
     expect(absentOut.input).toEqual(INPUT);
   });
 
@@ -88,7 +88,7 @@ describe("opencode Free tool_choice auto-only", () => {
     const sent = JSON.parse(actualInit.body);
     expect(sent.tool_choice).toBe("auto");
     expect(sent.model).toBe(FREE_13);
-    expect(sent.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(sent.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "glob", "grep", "read"]);
     expect(sent.input).toEqual(INPUT);
   });
 
@@ -98,7 +98,7 @@ describe("opencode Free tool_choice auto-only", () => {
     }));
     const body = { model: FREE_13, input: structuredClone(INPUT), tools: tools46 };
     const out = new OpenCodeExecutor().transformRequest(FREE_13, body, true, CREDS);
-    expect(out.tools).toHaveLength(48);
+    expect(out.tools).toHaveLength(50);
     const names = new Set(out.tools.map((t) => t.name));
     expect(names.has("bash")).toBe(true);
     expect(names.has("read")).toBe(true);
